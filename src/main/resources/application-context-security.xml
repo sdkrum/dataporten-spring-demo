@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<b:beans xmlns="http://www.springframework.org/schema/security" xmlns:b="http://www.springframework.org/schema/beans"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:oauth="http://www.springframework.org/schema/security/oauth2"
+         xmlns:context="http://www.springframework.org/schema/context"
+         xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-3.0.xsd
+		http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security-3.2.xsd
+    http://www.springframework.org/schema/security/oauth2 http://www.springframework.org/schema/security/spring-security-oauth2.xsd
+    http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd">
+
+
+  <!-- This one reads the properties, and takes those from your environment into account. -->
+  <b:bean id="propertyConfigurer" class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+    <b:property name="locations">
+      <b:list>
+        <b:value>classpath:application.properties</b:value>
+      </b:list>
+    </b:property>
+    <b:property name="ignoreResourceNotFound" value="false" />
+    <b:property name="searchSystemEnvironment" value="true" />
+    <b:property name="systemPropertiesModeName" value="SYSTEM_PROPERTIES_MODE_OVERRIDE" />
+  </b:bean>
+
+  <global-method-security pre-post-annotations="enabled" />
+  <http security="none" pattern="/index.html" />
+
+  <!-- Secured pages -->
+  <http entry-point-ref="clientAuthenticationEntryPoint" use-expressions="true" authentication-manager-ref="authenticationManager" >
+    <http-basic/>
+    <logout logout-url="/logout" success-handler-ref="customLogoutHandler"/>
+    <anonymous enabled="false"/>
+    <intercept-url pattern="${oauth2.redirect-url}" access="isFullyAuthenticated()" />
+    <intercept-url pattern="/**" access="hasAnyRole('ROLE_ADMIN','ROLE_USER')" />
+    <!--
+    The order in which these filters execute are very important. oauth2ClientContextFilter must be invoked before
+    oAuth2AuthenticationProcessingFilter, that's because when a redirect to dataporten is required, oAuth2AuthenticationProcessingFilter
+    throws a UserRedirectException which the oauth2ClientContextFilter handles and generates a redirect request to dataporten.
+    Subsequently the response from dataporten is handled by the oAuth2AuthenticationProcessingFilter to populate the
+    Authentication object and stored in the SecurityContext
+    -->
+    <custom-filter ref="oauth2ClientContextFilter" after="EXCEPTION_TRANSLATION_FILTER"/>
+    <custom-filter ref="oAuth2AuthenticationProcessingFilter" before="FILTER_SECURITY_INTERCEPTOR"/>
+    <access-denied-handler ref="oauthAccessDeniedHandler"/>
+  </http>
+
+  <b:bean id="clientAuthenticationEntryPoint" class="org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint">
+    <b:property name="loginFormUrl" value="${oauth2.redirect-url}"/>
+  </b:bean>
+
+  <oauth:client id="oauth2ClientContextFilter" />
+  <oauth:resource-server id="oauth2ProviderFilter" token-services-ref="remoteTokenServices" authentication-manager-ref="authenticationManager"/>
+  <oauth:rest-template id="restTemplate" resource="oauth2ProtectedResourceDetails" />
+
+  <b:bean id="customSuccessRedirectHandler"
+          class="no.uninett.system.dataporten.demo.CustomAuthenticationHandler">
+    <b:property name="defaultTargetUrl" value="/pages/user/overview.jsf" /> <!-- default for approved user in case request cached is clear, no specific target -->
+    <b:property name="nonApprovedDefaultTargetUrl" value="/pages/static/requestApproval.jsf" /> <!-- default for non-approved user ONLY -->
+    <b:property name="approvedDefaultTargetUrl" value="/pages/user/overview.jsf" />
+  </b:bean>
+
+  <b:bean id="customLogoutHandler" class="no.uninett.system.dataporten.demo.CustomLogoutSuccessHandler">
+    <b:property name="alwaysUseDefaultTargetUrl" value="true" />
+    <b:property name="defaultTargetUrl" value="/welcome.xhtml" />
+  </b:bean>
+
+  <b:bean id="oauthAccessDeniedHandler" class="org.springframework.security.oauth2.provider.error.OAuth2AccessDeniedHandler" />
+
+  <b:bean id="authenticationManager" class="org.springframework.security.oauth2.provider.authentication.OAuth2AuthenticationManager">
+    <b:property name="tokenServices" ref="remoteTokenServices" />
+  </b:bean>
+
+  <b:bean id="oAuth2AuthenticationProcessingFilter" class="org.springframework.security.oauth2.client.filter.OAuth2ClientAuthenticationProcessingFilter">
+    <b:constructor-arg name="defaultFilterProcessesUrl" value="${oauth2.redirect-url}"/>
+    <b:property name="restTemplate" ref="restTemplate"/>
+    <b:property name="tokenServices" ref="remoteTokenServices"/>
+    <b:property name="authenticationSuccessHandler" ref="customSuccessRedirectHandler" />
+  </b:bean>
+
+  <b:bean id="oauth2ProtectedResourceDetails" class="org.springframework.security.oauth2.client.token.grant.code.AuthorizationCodeResourceDetails">
+    <b:property name="id" value="archive-test"/>
+    <b:property name="clientId" value="${DATAPORTEN_CLIENTID}"/>
+    <b:property name="clientSecret" value="${DATAPORTEN_CLIENTSECRET}"/>
+    <b:property name="accessTokenUri" value="${oauth2.token-endpoint}"/>
+    <b:property name="userAuthorizationUri" value="${oauth2.authorization-endpoint}"/>
+    <b:property name="preEstablishedRedirectUri" value="${your.server.url}${oauth2.redirect-url}"/>
+    <b:property name="scope" value="${oauth2.scope}"/>
+    <b:property name="grantType" value="authorization_code"/>
+    <b:property name="useCurrentUri" value="false"/>
+  </b:bean>
+
+  <b:bean id="remoteTokenServices" class="no.uninett.system.dataporten.demo.DataportenRemoteTokenServices">
+    <b:constructor-arg name="clientId" value="${DATAPORTEN_CLIENTID}"/>
+    <b:constructor-arg name="userEndpointUrl" value="${oauth2.user-info-endpoint}"/>
+  </b:bean>
+
+</b:beans>
